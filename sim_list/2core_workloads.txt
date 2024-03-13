@@ -1,0 +1,12 @@
+462.libquantum-1343B 470.lbm-1274B
+462.libquantum-1343B 471.omnetpp-188B
+462.libquantum-1343B 450.soplex-247B
+462.libquantum-1343B 482.sphinx3-1100B
+462.libquantum-1343B 462.libquantum-1343B
+462.libquantum-1343B 434.zeusmp-10B
+462.libquantum-1343B 433.milc-127B
+462.libquantum-1343B 400.perlbench-41B
+462.libquantum-1343B 473.astar-153B
+462.libquantum-1343B 465.tonto-1914B
+462.libquantum-1343B 459.GemsFDTD_716B
+462.libquantum-1343B 435.gromacs-111B
