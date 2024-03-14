@@ -1,0 +1,350 @@
+#include "cache.h"
+#include "GenericTable.h"
+#include "Types.h"
+
+#include <cstdlib>
+#include <bits/stdc++.h>
+using namespace std;
+// -----------------------------------------------------------------------------
+// Class: CmpStreamPrefetcher
+// Description:
+// This class implements a stream prefetcher. Similar to the IBM
+// Power prefetchers. Imported primarily from the stream
+// prefetcher in scarab/ringo
+// -----------------------------------------------------------------------------
+
+class CmpStreamPrefetcher {
+public:
+    // 将原来 protected 的成员变量移到 public 下
+    uint32_t _blockSize;
+    bool _prefetchOnWrite;
+    
+    uint32_t _tableSize;
+    string _tablePolicy;
+    uint32_t _numTrains;
+    uint32_t _trainDistance;
+    uint32_t _distance;
+    uint32_t _degree;
+    uint32_t _maxFakeCounter;
+    bool _fake;
+    // 枚举和结构体定义保持不变
+    enum StreamDirection { FORWARD = 1, BACKWARD = -1, NONE = 0 };
+
+    struct StreamEntry {
+        //分配这个stream entry的地址和指令
+        uint64_t allocMissAddress;
+        uint64_t ip;
+        // cpu ID
+        uint32_t appID;
+        uint64_t counterVal;
+        bool faked;
+        // start and end pointers of the stream
+        uint64_t sp, ep;
+        // last fake
+        uint64_t last_demand_v, fake_vp;
+        //is the prefetcher trained
+        int trainHits;
+        bool trained;
+        StreamDirection direction;
+    };
+
+    vector<uint64_t> _appCounter;
+    // Prefetcher table
+    generic_table_t<uint32_t, StreamEntry> _streamTable;
+    // Running index, primarily to reuse the generic table implementation
+    uint32_t _runningIndex = 0;
+    addr_t _trainAddrDistance = _trainDistance * _blockSize;
+    addr_t _prefetchAddrDistance = _distance * _blockSize;
+    // 声明一个计数器
+    NEW_COUNTER(num_prefetches);
+
+    CmpStreamPrefetcher() {
+        _blockSize = 64;
+        _prefetchOnWrite = false;
+
+        _tableSize = 16;
+        _tablePolicy = "lru";
+        _trainDistance = 16;
+        _numTrains = 2;
+        _distance = 24;
+        _degree = 4;
+        _maxFakeCounter = 16;
+        _fake = false;  
+
+        INITIALIZE_COUNTER(num_prefetches, "Number of prefetches issued");
+
+        _streamTable.SetTableParameters(_tableSize, _tablePolicy);
+        _runningIndex = 0;
+
+        _appCounter.resize(2, 0);
+
+        _trainAddrDistance = _trainDistance * _blockSize;
+        _prefetchAddrDistance = _distance * _blockSize;
+    }
+    /**
+     * @return A vector of block numbers that should be prefetched.
+     */
+    // access 接口是champsim自带
+    vector<pair<uint64_t, uint32_t>> access(uint32_t cpu, uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type) {
+        // // 原有预取器的工作逻辑，这几个请求不会触发预取器
+        // if (request -> type == MemoryRequest::WRITE ||
+        //     request -> type == MemoryRequest::WRITEBACK ||
+        //     request -> type == MemoryRequest::PREFETCH) {
+        //     // do nothing
+        //     return 0;
+        // }    
+        // if (!_prefetchOnWrite &&
+        //     (request -> type == MemoryRequest::READ_FOR_WRITE)) {
+        //     // do nothing
+        //     return 0;
+        // }
+        //相应的cpu访问+1
+        _appCounter[cpu] ++;
+        
+         //化为整块地址开始
+        addr = (addr >> LOG2_BLOCK_SIZE) << LOG2_BLOCK_SIZE;
+
+        table_t <uint32_t, StreamEntry>::entry row;
+        
+        bool hit = false;
+        uint32_t key;
+
+        //存储发起的预取请求地址，如果没有就返回空列表,这里是champsim在调用operate prefetch需要返回的
+        vector<pair<uint64_t, uint32_t>> pred;
+
+        // Check if there is a stream entry matching the address
+        for (uint32_t i = 0; i < _tableSize; i ++) {
+            // get row i from the stream table
+            row = _streamTable.entry_at_index(i);
+            // if row is invalid, continue
+            if (!row.valid) continue;
+            // get the stream entry information
+            StreamEntry entry = row.value;
+            // if entry is in the training phase
+            if (!row.value.trained) {
+                if (llabs(entry.allocMissAddress - addr) < _trainAddrDistance) {
+                // HIT! entry within training scope
+                hit = true;
+                key = row.key;
+                break;
+                }
+            }
+            // not training phase
+            else {
+                if (entry.sp <= addr && entry.ep >= addr) {
+                // HIT! entry within monitor scope
+                    hit = true;
+                    key = row.key;
+                    break;
+                }
+            }
+        }
+
+        // If there is a stream entry, then update the entry based on
+        // the current phase and issue prefetches if necessary
+        if (hit) {
+            // dummy read to update replacement state
+            _streamTable.read(key);
+            
+            // real read to modify stream entry state
+            StreamEntry &entry = _streamTable[key];
+            entry.counterVal = _appCounter[entry.appID];
+            entry.faked = false;
+
+            // entry not trained yet
+            if (!entry.trained) {
+                // forward direction
+                if (entry.allocMissAddress < addr) {
+                    switch (entry.direction) {
+                    case FORWARD:
+                        // same direction.
+                        entry.trainHits ++;
+                        if (addr > entry.ep) {
+                        entry.ep = addr;
+                        }
+                        break;
+                    case BACKWARD:
+                    case NONE:
+                        // new direction
+                        entry.trainHits = 1;
+                        entry.direction = FORWARD;
+                        entry.ep = addr;
+                        break;
+                    }
+                }
+                // backward direction
+                else {
+                    switch (entry.direction) {
+                    case BACKWARD:
+                        // same direction.
+                        entry.trainHits ++;
+                        if (addr < entry.ep) {
+                        entry.ep = addr;
+                        }
+                        break;
+                    case FORWARD:
+                    case NONE:
+                        // new direction
+                        entry.trainHits = 1;
+                        entry.direction = BACKWARD;
+                        entry.ep = addr;
+                        break;
+                    }
+                }
+
+                // Upgrade to trained?
+                if (entry.trainHits >= _numTrains)
+                entry.trained = true;
+            }
+
+            // entry trained
+            if (entry.trained) {
+                // Issue prefetches
+
+                // update the request entry
+                // 这个原有prefetch_line函数中就有记录
+                // 感觉这两个更新不太需要？
+                // request -> d_prefetched = true;
+                // request -> d_prefID = row.index;
+
+                int32_t numPrefetches = 0;
+
+                // start points to current demand
+                // 把这个entry的起始指针指向当前地址
+                entry.sp = addr;
+                
+                // determine number of prefetches to issue
+                // 发起的最大预取的个数
+                int32_t  maxPrefetches = 0;
+                if (entry.direction == FORWARD) {
+                    uint64_t maxAddress = entry.sp + (_prefetchAddrDistance + _blockSize);
+                    maxPrefetches = (maxAddress - entry.ep) / _blockSize;
+                }
+                else {
+                    uint64_t minAddress = entry.sp - (_prefetchAddrDistance + _blockSize);
+                    maxPrefetches = (entry.ep - minAddress) / _blockSize;
+                }
+                numPrefetches = (maxPrefetches < _degree ? maxPrefetches : _degree);
+
+                
+                for (int32_t i = 0; i < numPrefetches; i ++) {
+                    entry.ep += (entry.direction * _blockSize);
+                    //同时传回预取地址和prefID
+                    pred.push_back(make_pair(entry.ep, row.index));
+                    //还未实现
+                    // prefetch -> prefetcherID = row.index;
+                }
+
+                ADD_TO_COUNTER(num_prefetches, numPrefetches);
+
+                // issue fake reads
+                int32_t numFakes;
+                addr_t vcurrent;
+                //关于fake的部分删除了
+
+                entry.last_demand_v = addr;
+                
+                if (entry.direction == FORWARD &&
+                    (entry.ep - entry.sp) > _prefetchAddrDistance) {
+                entry.sp = entry.ep - _prefetchAddrDistance;
+                }
+                else if (entry.direction == BACKWARD &&
+                        (entry.sp - entry.ep) > _prefetchAddrDistance) {
+                entry.sp = entry.ep + _prefetchAddrDistance;
+                }
+            }
+
+            // Remove redundant stream entry
+            for (uint32_t i = 0; i < _tableSize; i ++) {
+                row = _streamTable.entry_at_index(i);
+                if (!row.valid) continue;
+                if (row.key == key) continue;
+
+                if (((entry.direction == FORWARD) &&
+                    ((row.value.sp <= entry.ep && row.value.sp >= entry.sp) ||
+                    (row.value.ep <= entry.ep && row.value.ep >= entry.sp))) ||
+                    ((entry.direction == BACKWARD) &&
+                    ((row.value.sp <= entry.sp && row.value.sp >= entry.ep) ||
+                    (row.value.ep <= entry.sp && row.value.ep >= entry.ep)))) {
+                _streamTable.invalidate(row.key);
+                }
+            }
+        }
+
+        // If there is no stream entry, allocate a new stream entry
+        else {
+        // Create a new stream entry
+            StreamEntry entry;
+            table_t <uint32_t, StreamEntry>::entry evicted;
+            entry.allocMissAddress = addr;
+            entry.ip = ip;
+            entry.appID = cpu;
+            entry.counterVal = _appCounter[entry.appID];
+            entry.sp = addr;
+            entry.ep = addr;
+            entry.last_demand_v = addr;
+            entry.fake_vp = addr;
+            entry.trainHits = 0;
+            entry.trained = false;
+            entry.direction = NONE;
+            evicted = _streamTable.insert(_runningIndex, entry);
+            _runningIndex ++;
+        }
+        return pred;
+    }
+
+
+
+
+};
+
+vector<CmpStreamPrefetcher> prefetchers;
+
+void CACHE::llc_prefetcher_initialize_(uint32_t cpu) {
+    if (cpu!=0)
+        return;
+    prefetchers = vector<CmpStreamPrefetcher>(NUM_CPUS, CmpStreamPrefetcher());
+}
+
+void CACHE::llc_prefetcher_operate_(uint32_t cpu, uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type) {
+    uint64_t block_number = addr >> LOG2_BLOCK_SIZE;
+    uint32_t set = get_set(block_number);
+    uint32_t way = get_way(block_number, set);
+    uint8_t prefetch = block[set][way].prefetch;
+
+    /* check prefetch hit */
+    bool prefetch_hit = false;
+    if (cache_hit == 1 && prefetch == 1)
+        prefetch_hit = true;
+
+    /* check trigger access */
+    // 两种情况：1. 未命中，命中预取块；与BOOM实现同步
+    bool trigger_access = false;
+    if (cache_hit == 0 || prefetch_hit)
+        trigger_access = true;
+
+    if (!trigger_access)
+        return;
+
+    /* call prefetcher and send prefetches */
+    //在原来cmpstreamprefetcher中，使用的是addr，我们这里可以把block_number转换为addr，
+    //或者我们在这里直接实现预取过程，不用access调用了，传参麻烦
+    vector<pair<uint64_t, uint32_t>> to_prefetch = prefetchers[cpu].access(cpu, addr, ip, cache_hit, type);
+    for (auto &prefetch : to_prefetch) {
+        // uint64_t pf_address = pf_block_number << LOG2_BLOCK_SIZE;
+        /* champsim automatically ignores prefetches that cross page boundaries */
+        stream_prefetch_line(cpu, ip, addr, prefetch.first, FILL_LLC, prefetch.second);
+    }
+}
+
+void CACHE::llc_prefetcher_cache_fill_(uint32_t cpu, uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr) {
+    // prefetchers[cpu].cache_fill(addr >> LOG2_BLOCK_SIZE, (bool)prefetch);
+}
+
+void CACHE::llc_prefetcher_inform_warmup_complete_() {}
+
+void CACHE::llc_prefetcher_inform_roi_complete_(uint32_t cpu) {}
+
+void CACHE::llc_prefetcher_roi_stats_(uint32_t cpu) {}
+
+void CACHE::llc_prefetcher_final_stats_(uint32_t cpu) {}

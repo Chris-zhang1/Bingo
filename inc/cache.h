@@ -266,6 +266,7 @@ class CACHE : public MEMORY {
     int check_hit(PACKET *packet),
         invalidate_entry(uint64_t inval_addr), check_mshr(PACKET *packet),
         prefetch_line(uint32_t cpu, uint64_t ip, uint64_t base_addr, uint64_t pf_addr, int fill_level),
+        stream_prefetch_line(uint32_t cpu, uint64_t ip, uint64_t base_addr, uint64_t pf_addr, int fill_level, uint32_t prefID),
         kpc_prefetch_line(uint64_t base_addr, uint64_t pf_addr, int fill_level, int delta, int depth, int signature, int confidence);
 
     void handle_fill(), handle_writeback(), handle_read(), handle_prefetch();

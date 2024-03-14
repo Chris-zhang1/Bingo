@@ -49,6 +49,7 @@ class DRAM_ARRAY {
 // message packet
 class PACKET {
   public:
+    uint32_t prefID;
     uint8_t instruction, tlb_access, scheduled, translated, fetched, prefetched, drc_tag_read;
 
     int fill_level, rob_signal, rob_index, producer, delta, depth, signature, confidence;
