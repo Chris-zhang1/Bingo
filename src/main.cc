@@ -61,6 +61,10 @@ void print_roi_stats(uint32_t cpu, CACHE *cache)
     cout << cache->NAME;
     cout << " PREFETCH  REQUESTED: " << setw(10) << cache->pf_requested << "  ISSUED: " << setw(10) << cache->pf_issued;
     cout << "  USEFUL: " << setw(10) << cache->pf_useful << "  USELESS: " << setw(10) << cache->pf_useless << endl;
+
+    //icp
+    cout << cache->NAME;
+    cout << "  PREFETCH UNUSED: " << setw(10) << cache->unused_prefetches << "  PREFETCH USEDONCE: " << setw(10) <<cache->used_prefetches << "  PREFETCH USEDOVERONCE: " << setw(10) << cache->reused_prefetches << "  UNREUSED PREFETCH: " << setw(10) << cache->unused_prefetches << endl;
 }
 
 void print_sim_stats(uint32_t cpu, CACHE *cache)

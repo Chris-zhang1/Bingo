@@ -4,9 +4,17 @@
 #include "champsim.h"
 #include "instruction.h"
 
+enum PrefetchState { //这里是每一个tag中都有一个prefetchstate，champsim中需要更新一个tagentry才行
+    NOT_PREFETCHED,
+    PREFETCHED_UNUSED,
+    PREFETCHED_USED,
+    PREFETCHED_REUSED,
+};
+
 // CACHE BLOCK
 class BLOCK {
   public:
+    PrefetchState prefState; //这个需要重新添加
     uint8_t valid, prefetch, dirty, used;
 
     int delta, depth, signature, confidence;
@@ -17,6 +25,7 @@ class BLOCK {
     uint32_t lru;
 
     BLOCK() {
+        prefState = NOT_PREFETCHED;
         valid = 0;
         prefetch = 0;
         dirty = 0;

@@ -190,6 +190,8 @@ class CACHE : public MEMORY {
 
     // prefetch stats
     uint64_t pf_requested, pf_issued, pf_useful, pf_useless, pf_fill;
+    //icp
+    uint64_t unused_prefetches, used_prefetches, unreused_prefetches, reused_prefetches;
 
     // queues
     PACKET_QUEUE WQ{NAME + "_WQ", WQ_SIZE},       // write queue
@@ -242,6 +244,12 @@ class CACHE : public MEMORY {
         pf_useful = 0;
         pf_useless = 0;
         pf_fill = 0;
+        //icp
+        unused_prefetches = 0;
+        used_prefetches = 0;
+        unreused_prefetches = 0;
+        reused_prefetches = 0;
+        
     };
 
     // destructor

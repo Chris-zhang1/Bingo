@@ -473,7 +473,16 @@ void CACHE::handle_read()
                     block[set][way].prefetch = 0;
                 }
                 block[set][way].used = 1;
-
+                //icp
+                if (block[set][way].prefState == PREFETCHED_UNUSED) {
+                    block[set][way].prefState = PREFETCHED_USED;
+                    used_prefetches ++;
+                } else if (block[set][way].prefState == PREFETCHED_USED) {
+                    block[set][way].prefState = PREFETCHED_REUSED;
+                    reused_prefetches ++;
+                } else if (block[set][way].prefState == PREFETCHED_REUSED) {
+                    reused_prefetches ++;
+                }
                 HIT[RQ.entry[index].type]++;
                 ACCESS[RQ.entry[index].type]++;
                 
@@ -835,12 +844,24 @@ void CACHE::fill_cache(uint32_t set, uint32_t way, PACKET *packet)
 #endif
     if (block[set][way].prefetch && (block[set][way].used == 0))
         pf_useless++;
+    //icp
+    if (block[set][way].prefState == PREFETCHED_UNUSED)
+        unused_prefetches ++;
+    if (block[set][way].prefState == PREFETCHED_USED)
+        unreused_prefetches ++;    
+
 
     if (block[set][way].valid == 0)
         block[set][way].valid = 1;
     block[set][way].dirty = 0;
     block[set][way].prefetch = (packet->type == PREFETCH) ? 1 : 0;
     block[set][way].used = 0;
+    //icp
+    if (block[set][way].prefetch) {
+        block[set][way].prefState = PREFETCHED_UNUSED;
+    }else {
+        block[set][way].prefState = NOT_PREFETCHED;
+    }
 
     if (block[set][way].prefetch)
         pf_fill++;
@@ -1139,6 +1160,41 @@ int CACHE::prefetch_line(uint32_t cpu, uint64_t ip, uint64_t base_addr, uint64_t
 
     return 0;
 }
+int CACHE::stream_prefetch_line(uint32_t cpu, uint64_t ip, uint64_t base_addr, uint64_t pf_addr, int fill_level, uint32_t prefID)
+{
+    pf_requested++;
+
+    if (PQ.occupancy < PQ.SIZE) {
+        // base_addr是请求的全地址，判断请求和预取请求是否在同一页
+        if ((base_addr>>LOG2_PAGE_SIZE) == (pf_addr>>LOG2_PAGE_SIZE)) {
+            
+            PACKET pf_packet;
+            // 写入预取请求中的prefID 
+            pf_packet.prefID = prefID;
+            pf_packet.fill_level = fill_level;
+            pf_packet.cpu = cpu;
+            //pf_packet.data_index = LQ.entry[lq_index].data_index;
+            //pf_packet.lq_index = lq_index;
+            pf_packet.address = pf_addr >> LOG2_BLOCK_SIZE;
+            pf_packet.full_addr = pf_addr;
+            //pf_packet.instr_id = LQ.entry[lq_index].instr_id;
+            //pf_packet.rob_index = LQ.entry[lq_index].rob_index;
+            pf_packet.ip = ip;
+            pf_packet.type = PREFETCH;
+            pf_packet.event_cycle = current_core_cycle[cpu];	//Bingo: Handle late prefetches, here.
+
+            // give a dummy 0 as the IP of a prefetch
+            add_pq(&pf_packet);
+
+            pf_issued++;
+
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 
 int CACHE::kpc_prefetch_line(uint64_t base_addr, uint64_t pf_addr, int fill_level, int delta, int depth, int signature, int confidence)
 {
