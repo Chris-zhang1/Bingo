@@ -7,6 +7,8 @@
 #include <unordered_set>
 #include "memory_class.h"
 
+#include "VictimTagStore.h"
+
 using namespace std;
 
 // PAGE
@@ -67,7 +69,7 @@ extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 // #define L2C_LATENCY 8  // 4 (L1I or L1D) + 8 = 12 cycles
 
 // SECOND LEVEL TLB
-#define STLB_SET NUM_CPUS * 128
+#define STLB_SET 128
 #define STLB_WAY 16
 #define STLB_RQ_SIZE (NUM_CPUS * (ITLB_MSHR_SIZE + DTLB_MSHR_SIZE))
 #define STLB_WQ_SIZE (NUM_CPUS * (ITLB_MSHR_SIZE + DTLB_MSHR_SIZE))
@@ -76,13 +78,13 @@ extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 #define STLB_LATENCY 1
 
 // LAST LEVEL CACHE
-#define LLC_SET NUM_CPUS * 2048
-#define LLC_WAY 16
+#define LLC_SET 256
+#define LLC_WAY 4
 #define LLC_RQ_SIZE (NUM_CPUS * (L1I_MSHR_SIZE + L1D_MSHR_SIZE))
 #define LLC_WQ_SIZE (NUM_CPUS * (L1I_MSHR_SIZE + L1D_MSHR_SIZE))
 #define LLC_PQ_SIZE (NUM_CPUS * (L1I_MSHR_SIZE + L1D_MSHR_SIZE))
-#define LLC_MSHR_SIZE 128
-#define LLC_LATENCY 10 // 4 (L1I or L1D) + 8 + 20 = 32 cycles
+#define LLC_MSHR_SIZE 32
+#define LLC_LATENCY 20 // 4 (L1I or L1D) + 8 + 20 = 32 cycles
 
 class Stats {
   public:
@@ -192,6 +194,7 @@ class CACHE : public MEMORY {
     uint64_t pf_requested, pf_issued, pf_useful, pf_useless, pf_fill;
     //icp
     uint64_t unused_prefetches, used_prefetches, unreused_prefetches, reused_prefetches;
+    evicted_address_filter_t _eaf;//用victim_tag_store构建的
 
     // queues
     PACKET_QUEUE WQ{NAME + "_WQ", WQ_SIZE},       // write queue
@@ -249,7 +252,7 @@ class CACHE : public MEMORY {
         used_prefetches = 0;
         unreused_prefetches = 0;
         reused_prefetches = 0;
-        
+
     };
 
     // destructor

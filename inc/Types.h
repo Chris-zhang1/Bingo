@@ -15,37 +15,37 @@ using namespace std;
 // Macros to add and manipulate statistics
 // -----------------------------------------------------------------------------
 // statistics
-struct Statss {
-  string longname;
-  uint64_t *ptr;
-};
-map <string, Statss> _statss;
-list <string> _statssOrder;
-#define NEW_COUNTER(var) uint64_t c_##var
+// struct Stats {
+//   string longname;
+//   uint64_t *ptr;
+// };
+// map <string, Stats> _stats;
+// list <string> _statsOrder;
+// #define NEW_COUNTER(var) uint64_t c_##var
 
-#define INITIALIZE_COUNTER(var, lname) {\
-  _statssOrder.push_back(#var);\
-  _statss[#var].ptr = &c_##var;\
-}
+// #define INITIALIZE_COUNTER(var, lname) {\
+//   _statsOrder.push_back(#var);\
+//   _stats[#var].ptr = &c_##var;\
+// }
 
-#define INCREMENT(var) {\
-  c_##var ++;\
-}
+// #define INCREMENT(var) {\
+//   c_##var ++;\
+// }
 
-#define DECREMENT(var) {\
-  c_##var --;\
-}
+// #define DECREMENT(var) {\
+//   c_##var --;\
+// }
 
-#define ADD_TO_COUNTER(var,value) {\
-  c_##var += (value);\
-}
+// #define ADD_TO_COUNTER(var,value) {\
+//   c_##var += (value);\
+// }
 
-#define RESET_ALL_COUNTERS {\
-  map <string, Statss>::iterator it;\
-  for (it = _statss.begin(); it != _statss.end(); it ++) {\
-    *((*it).second.ptr) = 0;\
-  }\
-}
+// #define RESET_ALL_COUNTERS {\
+//   map <string, Statss>::iterator it;\
+//   for (it = _stats.begin(); it != _stats.end(); it ++) {\
+//     *((*it).second.ptr) = 0;\
+//   }\
+// }
 
 
 
